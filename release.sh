@@ -2,10 +2,8 @@
 
 # The expectation is that this script will be run in a directory
 # containing a 'certs' subdirectory with the
-# keystore file (named metabase_keystore.jks) and
-# The mac app pem signing key (named "key.pem")
+# mac app pem signing key (named "key.pem")
 # If not, you will be prompted
-
 
 set -eu
 
@@ -22,12 +20,14 @@ else
     BRANCH=$2
 fi
 
+DOCKER_IMAGE="metabase/metabase:v$VERSION"
+
 # check that docker is running
 docker ps > /dev/null
 
 # ensure DockerHub credentials are configured
-if [ -z ${DOCKERHUB_EMAIL+x} ] || [ -z ${DOCKERHUB_USERNAME+x} ] || [ -z ${DOCKERHUB_PASSWORD+x} ]; then
-    echo "Ensure DOCKERHUB_EMAIL, DOCKERHUB_USERNAME, and DOCKERHUB_PASSWORD are set.";
+if [ -z ${DOCKERHUB_USERNAME+x} ] || [ -z ${DOCKERHUB_PASSWORD+x} ]; then
+    echo "Ensure DOCKERHUB_USERNAME and DOCKERHUB_PASSWORD are set.";
     exit 1
 fi
 
@@ -35,16 +35,6 @@ fi
 if [ -z ${AWS_DEFAULT_PROFILE+x} ]; then
     echo "Using default AWS_DEFAULT_PROFILE.";
     AWS_DEFAULT_PROFILE=default
-fi
-
-DEFAULT_KEYSTORE_PATH="$PWD/certs/metabase_keystore.jks"
-# ensure we have access to the keystore
-if [ -z ${KEYSTORE_PATH+x} ]; then
-    KEYSTORE_PATH="$DEFAULT_KEYSTORE_PATH"
-fi
-if [ ! -f "$KEYSTORE_PATH" ]; then
-    echo "Can't find Keystore with Jar signing key"
-    exit 1
 fi
 
 # commenting out the below section until we bring the mac build into this
@@ -71,8 +61,6 @@ fi
 #     echo "Can't find Mach build config"
 #     exit 1
 # fi
-
-
 
 # confirm the version and branch
 echo "Releasing v$VERSION from branch $BRANCH. Press enter to continue or ctrl-C to abort."
@@ -103,19 +91,17 @@ git tag -a "v$VERSION" -m "v$VERSION"
 git push --follow-tags -u origin "$BRANCH"
 
 echo "build it"
-bin/build
+docker build . -t "$DOCKER_IMAGE"
 
-echo "signing jar"
-jarsigner -tsa "http://timestamp.digicert.com" -keystore "$KEYSTORE_PATH" "target/uberjar/metabase.jar" server
-
-echo "verifing jar"
-jarsigner -verify "target/uberjar/metabase.jar"
+echo "extracting jar from docker image"
+docker run --rm --entrypoint /bin/sh "$DOCKER_IMAGE" -c "cat /app/target/uberjar/metabase.jar" > "metabase.jar"
 
 echo "uploading to s3"
-aws s3 cp "target/uberjar/metabase.jar" "s3://downloads.metabase.com/v$VERSION/metabase.jar"
+aws s3 cp "metabase.jar" "s3://downloads.metabase.com/v$VERSION/metabase.jar"
 
-echo "build docker image + publish"
-bin/docker/build_image.sh release "v$VERSION" --publish
+echo "publishing docker image"
+docker login --username="${DOCKERHUB_USERNAME}" --password="${DOCKERHUB_PASSWORD}"
+docker push "$DOCKER_IMAGE"
 
 echo "create elastic beanstalk artifacts"
 bin/aws-eb-docker/release-eb-version.sh "v$VERSION"
