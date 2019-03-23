@@ -105,11 +105,11 @@ git push --follow-tags -u origin "$BRANCH"
 echo "build it"
 bin/build
 
-echo "signing jar"
-jarsigner -tsa "http://timestamp.digicert.com" -keystore "$KEYSTORE_PATH" "target/uberjar/metabase.jar" server
+# echo "signing jar"
+# jarsigner -tsa "http://timestamp.digicert.com" -keystore "$KEYSTORE_PATH" "target/uberjar/metabase.jar" server
 
-echo "verifing jar"
-jarsigner -verify "target/uberjar/metabase.jar"
+# echo "verifing jar"
+# jarsigner -verify "target/uberjar/metabase.jar"
 
 echo "uploading to s3"
 aws s3 cp "target/uberjar/metabase.jar" "s3://downloads.metabase.com/v$VERSION/metabase.jar"
