@@ -7,7 +7,7 @@
 # If not, you will be prompted
 
 
-set -eu
+set -euo pipefail
 
 
 if [ $# -lt 1 ]; then
@@ -21,6 +21,8 @@ if [ $# -lt 2 ]; then
 else
     BRANCH=$2
 fi
+
+root_dir=`pwd`
 
 # check that docker is running
 docker ps > /dev/null
@@ -37,43 +39,6 @@ if [ -z ${AWS_DEFAULT_PROFILE+x} ]; then
     AWS_DEFAULT_PROFILE=default
 fi
 
-# DEFAULT_KEYSTORE_PATH="$PWD/certs/metabase_keystore.jks"
-# ensure we have access to the keystore
-# if [ -z ${KEYSTORE_PATH+x} ]; then
-#     KEYSTORE_PATH="$DEFAULT_KEYSTORE_PATH"
-# fi
-# if [ ! -f "$KEYSTORE_PATH" ]; then
-#     echo "Can't find Keystore with Jar signing key"
-#     exit 1
-# fi
-
-# commenting out the below section until we bring the mac build into this
-# # ensure we've configured the Mac signing key
-# DEFAULT_KEY_PEM_PATH="$PWD/certs/key.pem"
-# if [ -z "$KEY_PEM_PATH" ]; then
-#     KEY_PEM_PATH="$DEFAULT_KEY_PEM_PATH"
-# fi
-
-# if [ !(-f "$KEY_PEM_PATH") ]; then
-#     echo "Can't find Mac signing key"
-#     exit 1
-# fi
-
-
-# commenting out the below section until we bring the mac build into this
-# DEFAULT_CONFIG_JSON_PATH="$PWD/config.json"
-# # ensure we have access to the Mac build config
-# if [ -f "$CONFIG_JSON_PATH" ]; then
-#     CONFIG_JSON_PATH="$DEFAULT_CONFIG_JSON_PATH"
-# fi
-
-# if [ !(-f "$CONFIG_JSON_PATH") ]; then
-#     echo "Can't find Mach build config"
-#     exit 1
-# fi
-
-
-
 # confirm the version and branch
 echo "Releasing v$VERSION from branch $BRANCH. Press enter to continue or ctrl-C to abort."
 read
@@ -84,7 +49,7 @@ if ! [ -d "metabase" ]; then
 fi
 
 echo "fetching"
-cd metabase
+cd "$root_dir"/metabase
 git fetch
 
 echo "checkout the correct branch : $BRANCH from origin/$BRANCH"
@@ -105,12 +70,6 @@ git push --follow-tags -u origin "$BRANCH"
 echo "build it"
 bin/build
 
-# echo "signing jar"
-# jarsigner -tsa "http://timestamp.digicert.com" -keystore "$KEYSTORE_PATH" "target/uberjar/metabase.jar" server
-
-# echo "verifing jar"
-# jarsigner -verify "target/uberjar/metabase.jar"
-
 echo "uploading to s3"
 aws s3 cp "target/uberjar/metabase.jar" "s3://downloads.metabase.com/v$VERSION/metabase.jar"
 
@@ -120,31 +79,7 @@ bin/docker/build_image.sh release "v$VERSION" --publish
 echo "create elastic beanstalk artifacts"
 bin/aws-eb-docker/release-eb-version.sh "v$VERSION"
 
-# commenting out the below section until we bring the mac build into this
-# mac it
-# git submodule update --init
-# brew install curl && brew link curl --force || true
-# sudo cpan install File::Copy::Recursive JSON Readonly String::Util Text::Caml WWW::Curl::Simple
-# ./bin/osx-setup
-# echo "ok"
-
-cd ..
-
-echo "pulling down metabase-deploy"
-if ! [ -d "metabase-deploy" ]; then
-    echo "cant find ... cloning"
-    git clone git@github.com:metabase/metabase-deploy.git
-fi
-
-echo "pulling"
-cd metabase-deploy
-git pull
-
-echo "release heroku artifacts"
-# This is subsumed by the new buildpack PR
-# bin/release-heroku "v$VERSION"
-
-cd ..
+cd "$root_dir"
 
 echo "pulling down metabase-buildpack"
 if ! [ -d "metabase-buildpack" ]; then
@@ -153,7 +88,8 @@ if ! [ -d "metabase-buildpack" ]; then
 fi
 
 echo "pulling"
-cd metabase-buildpack
+cd "$root_dir"/metabase-buildpack
+git checkout master
 git pull
 
 echo "release heroku artifacts"
@@ -163,3 +99,9 @@ git commit -m "Deploy v$VERSION"
 git tag "$VERSION"
 git push
 git push --tags origin master
+
+echo "Build completed successfully!"
+
+echo "Calculating SHA-256 sum:"
+cd "$root_dir"
+shasum -a 256 ./metabase/target/uberjar/metabase.jar
